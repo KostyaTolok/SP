@@ -3,6 +3,7 @@
 
 #include "framework.h"
 #include "SP_lab9.h"
+#include <strsafe.h>
 
 #define MAX_LOADSTRING 100
 
@@ -16,6 +17,8 @@ ATOM                MyRegisterClass(HINSTANCE hInstance);
 BOOL                InitInstance(HINSTANCE, int);
 LRESULT CALLBACK    WndProc(HWND, UINT, WPARAM, LPARAM);
 INT_PTR CALLBACK    About(HWND, UINT, WPARAM, LPARAM);
+
+int max = 1000;
 
 int APIENTRY wWinMain(_In_ HINSTANCE hInstance,
                      _In_opt_ HINSTANCE hPrevInstance,
@@ -111,44 +114,119 @@ BOOL InitInstance(HINSTANCE hInstance, int nCmdShow)
    return TRUE;
 }
 
-//
-//  FUNCTION: WndProc(HWND, UINT, WPARAM, LPARAM)
-//
-//  PURPOSE: Processes messages for the main window.
-//
-//  WM_COMMAND  - process the application menu
-//  WM_PAINT    - Paint the main window
-//  WM_DESTROY  - post a quit message and return
-//
-//
+
+void SearchInner(HWND hwnd, HKEY hKeyRoot, LPTSTR lpSubKey, TCHAR* s)
+{
+    if (--max <= 0) return;
+    LPTSTR lpEnd;
+    LONG lResult;
+    DWORD dwSize;
+    TCHAR szName[MAX_PATH];
+    HKEY hKey;
+    FILETIME ftWrite;
+
+    lResult = RegOpenKeyEx(hKeyRoot, lpSubKey, 0, KEY_READ, &hKey);
+    if (lResult != ERROR_SUCCESS)
+    {
+        return;
+    }
+
+    if (_tcsstr(lpSubKey, s) != NULL)
+        SendMessage(hwnd, LB_ADDSTRING, 0, (LPARAM)lpSubKey);
+
+    lpEnd = lpSubKey + lstrlen(lpSubKey);
+
+    if (*(lpEnd - 1) != TEXT('\\'))
+    {
+        *lpEnd = TEXT('\\');
+        lpEnd++;
+        *lpEnd = TEXT('\0');
+    }
+
+    dwSize = MAX_PATH;
+    lResult = RegEnumKeyEx(hKey, 0, szName, &dwSize, NULL,
+        NULL, NULL, &ftWrite);
+
+    if (lResult == ERROR_SUCCESS)
+    {
+        int index = 0;
+        do {
+            index++;
+
+            StringCchCopy(lpEnd, MAX_PATH * 2, szName);
+
+            SearchInner(hwnd, hKeyRoot, lpSubKey, s);
+            if (max <= 0) return;
+
+            dwSize = MAX_PATH;
+
+            lResult = RegEnumKeyEx(hKey, index, szName, &dwSize, NULL,
+                NULL, NULL, &ftWrite);
+
+        } while (lResult == ERROR_SUCCESS);
+    }
+
+    lpEnd--;
+    *lpEnd = TEXT('\0');
+
+    RegCloseKey(hKey);
+}
+
+void Search(HWND hwnd, TCHAR* s) {
+    SendMessage(hwnd, LB_RESETCONTENT, 0, 0);
+
+    LPTSTR lpSubKey = (LPTSTR)L"Software";
+    TCHAR szSearchKey[MAX_PATH * 2];
+    StringCchCopy(szSearchKey, MAX_PATH * 2, lpSubKey);
+
+    max = 1000;
+    SearchInner(hwnd, HKEY_LOCAL_MACHINE, szSearchKey, s);
+}
 LRESULT CALLBACK WndProc(HWND hWnd, UINT message, WPARAM wParam, LPARAM lParam)
 {
+    PAINTSTRUCT ps;
+    HDC hdc;
+
+    static HWND edit;
+    static HWND button;
+    static HWND list;
+
+
     switch (message)
     {
+    case WM_CREATE:
+    {
+        edit = CreateWindowEx(WS_EX_CLIENTEDGE, L"edit", L"", WS_TABSTOP | WS_CHILD | WS_VISIBLE | ES_AUTOVSCROLL | ES_AUTOHSCROLL,
+            50, 650, 850, 30, hWnd, (HMENU)101, hInst, NULL);
+
+        button = CreateWindow(L"button", L"Search", WS_TABSTOP | WS_CHILD | WS_VISIBLE | BS_DEFPUSHBUTTON,
+            900, 650, 150, 30, hWnd, (HMENU)102, hInst, NULL);
+
+        list = CreateWindowEx(WS_EX_CLIENTEDGE, L"listbox", L"", WS_CHILD | WS_VISIBLE | WS_VSCROLL | ES_AUTOVSCROLL,
+            50, 50, 1000, 600, hWnd, (HMENU)103, hInst, NULL);
+    }
+    break;
     case WM_COMMAND:
+        // Parse the menu selections:
+        switch (LOWORD(wParam))
         {
-            int wmId = LOWORD(wParam);
-            // Parse the menu selections:
-            switch (wmId)
-            {
-            case IDM_ABOUT:
-                DialogBox(hInst, MAKEINTRESOURCE(IDD_ABOUTBOX), hWnd, About);
-                break;
-            case IDM_EXIT:
-                DestroyWindow(hWnd);
-                break;
-            default:
-                return DefWindowProc(hWnd, message, wParam, lParam);
-            }
+        case 102:
+        {
+            int len;
+            len = SendMessage(edit, WM_GETTEXTLENGTH, 0, 0);
+            TCHAR buffer[256];
+            SendMessage(edit, WM_GETTEXT, len + 1, (LPARAM)buffer);
+            Search(list, buffer);
+        }
+        break;
+        default:
+            return DefWindowProc(hWnd, message, wParam, lParam);
         }
         break;
     case WM_PAINT:
-        {
-            PAINTSTRUCT ps;
-            HDC hdc = BeginPaint(hWnd, &ps);
-            // TODO: Add any drawing code that uses hdc here...
-            EndPaint(hWnd, &ps);
-        }
+        hdc = BeginPaint(hWnd, &ps);
+        // TODO: Add any drawing code here...
+        EndPaint(hWnd, &ps);
         break;
     case WM_DESTROY:
         PostQuitMessage(0);
